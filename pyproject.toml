@@ -1,0 +1,45 @@
+[project]
+name = "investor-game"
+version = "0.1.0"
+description = "Investor Negotiation Game: negotiate a startup investment against an AI investor in your terminal."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "httpx>=0.27",
+    "anthropic>=0.40",
+    "pydantic>=2.7",
+]
+
+[project.scripts]
+investor-game = "investor_game.cli.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/investor_game"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Frozen pydantic models are immutable and safe as argument defaults.
+extend-immutable-calls = ["investor_game.models.Offer"]
