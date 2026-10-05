@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import time
+from types import SimpleNamespace
 from typing import Any
 
 import anthropic
 
+from .. import llmlog
 from .base import VoiceDraft, VoiceError, VoiceRequest
 from .prompts import parse_draft, system_prompt, user_prompt
 
@@ -62,19 +65,33 @@ class ClaudeVoiceBackend:
             params["output_config"]["effort"] = "low"  # short in-character chat
             params["betas"] = [FALLBACK_BETA]
             params["fallbacks"] = "default"
+        api = self._client.beta.messages if "betas" in params else self._client.messages
+        started_at, started = llmlog.now(), time.monotonic()
         try:
-            if "betas" in params:
-                response = self._client.beta.messages.create(**params)
-            else:
-                response = self._client.messages.create(**params)
+            raw = api.with_raw_response.create(**params)
+            body = raw.read()
+            response = raw.parse()
         except anthropic.APITimeoutError as exc:
+            self._record(started_at, started, getattr(exc, "request", None),
+                         error=("timeout", "claude timed out"))
             raise VoiceError("claude timed out") from exc
         except anthropic.APIConnectionError as exc:
+            self._record(started_at, started, getattr(exc, "request", None),
+                         error=("connection", type(exc).__name__))
             raise VoiceError("claude connection failed") from exc
         except anthropic.APIStatusError as exc:
+            self._record(started_at, started, None, response=exc.response,
+                         error=("http_status", f"HTTP {exc.status_code}"))
             raise VoiceError(f"claude returned HTTP {exc.status_code}") from exc
 
-        if getattr(response, "stop_reason", None) == "refusal":
+        refused = getattr(response, "stop_reason", None) == "refusal"
+        self._record(
+            started_at, started, raw.http_request,
+            response=SimpleNamespace(status_code=raw.status_code, headers=raw.headers,
+                                     content=body),
+            error=("refused", "stop_reason refusal") if refused else None,
+        )
+        if refused:
             raise VoiceError("claude declined the request")
         text = next(
             (block.text for block in response.content if getattr(block, "type", "") == "text"),
@@ -82,3 +99,10 @@ class ClaudeVoiceBackend:
         )
         return parse_draft(text, request)
 
+    def _record(self, started_at: Any, started: float, http_request: Any,
+                response: Any = None, error: tuple[str, str] | None = None) -> None:
+        llmlog.record_http(
+            "voice-claude", self.model, http_request, started_at,
+            llmlog.elapsed_ms(started, time.monotonic()), response=response,
+            error={"type": error[0], "message": error[1]} if error else None,
+        )

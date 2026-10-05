@@ -228,20 +228,49 @@ def test_voice_that_always_raises_still_completes():
 # --- Claude -----------------------------------------------------------------
 
 
+class FakeRaw:
+    """Mimics anthropic's APIResponse from ``with_raw_response``."""
+
+    def __init__(self, params, text, stop_reason="end_turn", api_key="sk-ant-test"):
+        body = {k: v for k, v in params.items() if k != "betas"}
+        headers = {"x-api-key": api_key, "content-type": "application/json"}
+        if "betas" in params:
+            headers["anthropic-beta"] = ",".join(params["betas"])
+        self.http_request = httpx.Request("POST", "https://api.anthropic.com/v1/messages",
+                                          headers=headers, json=body)
+        self.status_code = 200
+        self.headers = {"content-type": "application/json", "request-id": "req_1"}
+        self._message = {
+            "id": "msg_1", "type": "message", "role": "assistant", "model": params["model"],
+            "content": [{"type": "text", "text": text}] if text is not None else [],
+            "stop_reason": stop_reason,
+        }
+
+    def read(self):
+        return json.dumps(self._message).encode()
+
+    def parse(self):
+        return SimpleNamespace(
+            stop_reason=self._message["stop_reason"],
+            content=[SimpleNamespace(**block) for block in self._message["content"]],
+        )
+
+
 class FakeClaude:
-    def __init__(self, *texts):
+    def __init__(self, *texts, stop_reason="end_turn"):
         self.texts = list(texts)
         self.calls = []
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
-        self.messages = SimpleNamespace(create=self._create)
+        self.stop_reason = stop_reason
+        raw = SimpleNamespace(create=self._create)
+        self.beta = SimpleNamespace(messages=SimpleNamespace(with_raw_response=raw))
+        self.messages = SimpleNamespace(with_raw_response=raw)
 
     def _create(self, **params):
         self.calls.append(params)
         text = self.texts.pop(0)
         if isinstance(text, Exception):
             raise text
-        return SimpleNamespace(stop_reason="end_turn",
-                               content=[SimpleNamespace(type="text", text=text)])
+        return FakeRaw(params, text, self.stop_reason)
 
 
 def claude_json(reply, options=()):
@@ -282,8 +311,7 @@ def test_claude_error_maps_to_template():
 
 
 def test_claude_refusal_is_failure():
-    fake = FakeClaude("x")
-    fake.beta.messages.create = lambda **p: SimpleNamespace(stop_reason="refusal", content=[])
+    fake = FakeClaude(None, stop_reason="refusal")
     with pytest.raises(VoiceError):
         ClaudeVoiceBackend(client=fake).compose(request())
 

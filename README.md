@@ -57,6 +57,7 @@ hidden.
 | `--offline` | `INVESTOR_GAME_OFFLINE` | | Forces `stub` for both |
 | `--brain-timeout` | `INVESTOR_GAME_BRAIN_TIMEOUT` | seconds, default 10 | |
 | `--voice-timeout` | `INVESTOR_GAME_VOICE_TIMEOUT` | seconds, default 60 | |
+| `--log-dir` | `INVESTOR_GAME_LOG_DIR` | folder | Log every LLM request/response (see below) |
 | `--debug` | `INVESTOR_GAME_DEBUG` | | Detailed errors on stderr |
 
 Without flags, the game uses Jev when `TYPESAFE_API_KEY` is set and Claude when
@@ -71,6 +72,83 @@ INVESTOR_GAME_OLLAMA_MODEL=qwen2.5:3b uv run investor-game --voice ollama
 If the brain fails or times out, your move is refused and the game stays exactly as it was,
 so you can try again. If the voice fails, the turn still completes with a template reply
 and system-built options. Jev and Laya share one HTTP adapter (`POST /v1/systemone`).
+
+### Settings in a `.env` file
+
+Rather than exporting variables in every shell, keep them in a `.env` file in the
+project folder:
+
+```bash
+cp .env.example .env      # every line starts commented out
+$EDITOR .env              # uncomment and fill in, e.g. ANTHROPIC_API_KEY=... INVESTOR_GAME_VOICE=claude
+uv run investor-game      # the banner shows "settings: .env" when it was loaded
+```
+
+- `.env` is read from the folder you run the game in, so run from the project folder.
+- Precedence: command-line flags win over variables exported in your shell, and those win
+  over `.env`. An exported variable is never overwritten.
+- Values may be quoted. `${OTHER_VAR}` is expanded in unquoted or double-quoted values;
+  use single quotes for a literal `$`.
+- A line that can't be parsed is skipped with a warning naming its line number. Its
+  contents are never printed.
+- `.env` is git-ignored, so keys stay out of the repository. `.env.example` documents every
+  supported variable.
+
+## LLM call logs
+
+Add `--log-dir PATH` (or set `INVESTOR_GAME_LOG_DIR`) to record every request sent to the
+real AI services, along with each response. Logging is off by default, and without it
+nothing is written to disk.
+
+```bash
+uv run investor-game --brain jev --voice claude --log-dir logs
+```
+
+Each game, including every "Play again", gets its own folder. Inside it there is one
+sub-folder per model service, and one JSON file per HTTP call:
+
+```
+logs/
+  2026-10-05T11-42-07_g1_rex/
+    game.json                      # investor, pitch, backends + models, start time
+    brain-jev/
+      001_turn01_offer.json        # NNN = call order, turnTT, purpose = move kind
+      002_turn02_message.json
+      003_turn02_message_retry.json  # retry after HTTP 429/529
+    voice-claude/
+      001_turn00_open.json         # the opening offer
+      002_turn01_counter.json      # purpose = the decided action
+      003_turn01_counter_retry.json  # corrective retry after a wrong number
+  2026-10-05T11-48-30_g2_grace/
+    ...
+```
+
+Each exchange file contains:
+
+```json
+{
+  "service": "voice-ollama", "model": "qwen2.5:3b", "game": 1, "turn": 1,
+  "purpose": "counter", "sequence": 2,
+  "started_at": "2026-10-05T11:42:31.204+04:00", "duration_ms": 1843,
+  "request":  { "method": "POST", "url": "http://localhost:11434/api/chat",
+                "headers": { "...": "..." }, "body": { "model": "...", "messages": ["..."] } },
+  "response": { "status": 200, "headers": { "...": "..." }, "body": { "message": { "...": "..." } } },
+  "error": null
+}
+```
+
+- `request.body` is exactly the JSON that was sent. `response.body` is the JSON that came
+  back, or the raw text if the body isn't JSON. On a timeout or connection error, `response`
+  is `null` and `error.type` says what happened.
+- Only real models are logged (jev, laya, claude, ollama). The built-in stubs and template
+  fallbacks are not, so an `--offline` game folder contains only `game.json`.
+- Credential headers (`authorization`, `x-api-key`, …) are written as `[REDACTED]`, and
+  configured API keys are scrubbed from the whole file. Secret investor limits are never
+  sent to any model, so they never appear in logs.
+- **Privacy:** logs contain everything the models saw, including your messages, the pitch
+  and the full prompts. They stay on your machine, and `logs/` is git-ignored.
+- If a log can't be written (for example, the folder isn't writable), the game shows one
+  warning and keeps playing without logging.
 
 ## Development
 
@@ -93,5 +171,9 @@ uv run ruff check src tests
 - `--brain stub --voice ollama` with `qwen2.5:3b`: in-character replies. The number guard
   corrected the small model's wrong numbers on retry (shown as "corrected after retry" in
   Brain insights) and used the plain sentence for the opening.
+- `--brain stub --voice ollama --log-dir …` with `qwen2.5:3b`: the game folder held
+  `game.json` and `voice-ollama/001_turn00_open.json` … `006_turn03_player_walked.json`,
+  including `_retry` files where the guard caught a reply missing the decided terms. The
+  retry's request body shows the correction note sent to the model.
 - Jev, Laya and Claude: not playtested (no keys or server on the test machine). They are
   covered by adapter tests with mocked HTTP responses and a faked Anthropic client.

@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
 
 from .. import __version__
-from ..config import ConfigError, Settings, build_brain, build_voice
+from ..config import ConfigError, Settings, build_brain, build_log_root, build_voice
+from ..env_file import EnvFileResult, load_env_file
 from ..session import Session
 from .screens import App, Terminal
 
 EXIT_INTERRUPTED = 130
+ENV_FILE_NAME = ".env"
+
+_ENV_FILE: EnvFileResult | None = None  # set by main(); None when app() is invoked directly
 
 app = typer.Typer(add_completion=False, help="Negotiate a startup investment against an AI "
                   "investor in your terminal. Games live in memory only: quitting discards them.")
@@ -43,6 +49,10 @@ def play(
     voice_timeout: Annotated[float, typer.Option(
         "--voice-timeout", envvar="INVESTOR_GAME_VOICE_TIMEOUT",
         help="Seconds to wait for a voice reply.")] = 60.0,
+    log_dir: Annotated[str | None, typer.Option(
+        "--log-dir", envvar="INVESTOR_GAME_LOG_DIR",
+        help="Write every LLM request/response as JSON files here, one folder per game.",
+    )] = None,
     debug: Annotated[bool, typer.Option(
         "--debug", envvar="INVESTOR_GAME_DEBUG",
         help="Print detailed errors to stderr.")] = False,
@@ -61,7 +71,8 @@ def play(
         format="%(levelname)s %(name)s: %(message)s",
     )
     try:
-        settings = Settings.build(brain, voice, offline, brain_timeout, voice_timeout, debug)
+        settings = Settings.build(brain, voice, offline, brain_timeout, voice_timeout, debug,
+                                  log_dir=log_dir)
     except ConfigError as exc:
         errors.print(f"[red]{exc}[/red]")
         raise typer.Exit(2) from None
@@ -72,9 +83,13 @@ def play(
         errors.print("Set it in your environment, or run with --offline to play without AI.")
         raise typer.Exit(2)
 
-    session = Session(build_brain(settings), build_voice(settings))
+    session = Session(build_brain(settings), build_voice(settings),
+                      log_root=build_log_root(settings), backends=settings.backends())
     try:
-        App(Terminal(console), session, settings.describe()).run()
+        banner = settings.describe()
+        if _ENV_FILE is not None and _ENV_FILE.loaded:
+            banner += f" · settings: {ENV_FILE_NAME}"
+        App(Terminal(console), session, banner).run()
     except KeyboardInterrupt:
         console.print("\nGoodbye! 👋")
         raise typer.Exit(EXIT_INTERRUPTED) from None
@@ -91,4 +106,9 @@ def play(
 
 
 def main() -> None:
+    # Load .env before Typer parses options: options with envvar= read os.environ then.
+    global _ENV_FILE
+    _ENV_FILE = load_env_file(Path.cwd() / ENV_FILE_NAME, os.environ)
+    if _ENV_FILE.warning:
+        Console(stderr=True).print(f"[yellow]{_ENV_FILE.warning}[/yellow]")
     app()

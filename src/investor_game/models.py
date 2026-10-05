@@ -354,6 +354,8 @@ class PlayerView(Frozen):
     options: tuple[Option, ...]
     outcome: Outcome | None
     final_offer: Offer | None
+    log_folder: str | None = None  # this game's LLM log folder, when logging is on
+    log_warning: str | None = None  # set once if writing LLM logs failed
 
     @property
     def ended(self) -> bool:

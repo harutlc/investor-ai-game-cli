@@ -5,12 +5,16 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from .brain.investor import InvestorBrain
 from .brain.stub import StubBrainBackend
-from .brain.systemone import SystemOneBackend
+from .brain.systemone import JEV_MODEL, LAYA_MODEL, SystemOneBackend
+from .llmlog import LogRoot
+from .voice.claude import DEFAULT_MODEL as CLAUDE_MODEL
 from .voice.claude import ClaudeVoiceBackend
 from .voice.guarded import GuardedVoice
+from .voice.ollama import DEFAULT_MODEL as OLLAMA_MODEL
 from .voice.ollama import OllamaVoiceBackend
 from .voice.stub import StubVoiceBackend
 
@@ -38,6 +42,7 @@ class Settings:
     claude_model: str | None = None
     ollama_host: str | None = None
     ollama_model: str | None = None
+    log_dir: Path | None = None
 
     @classmethod
     def build(
@@ -49,6 +54,7 @@ class Settings:
         voice_timeout: float = 60.0,
         debug: bool = False,
         env: Mapping[str, str] | None = None,
+        log_dir: str | Path | None = None,
     ) -> Settings:
         """Flags win; otherwise use a real backend only when its key is set, else the stub."""
         env = os.environ if env is None else env
@@ -67,6 +73,10 @@ class Settings:
             raise ConfigError(f"Unknown voice {voice!r}. Choose one of: {', '.join(VOICES)}.")
         if brain_timeout <= 0 or voice_timeout <= 0:
             raise ConfigError("Timeouts must be more than 0 seconds.")
+        log_path = Path(log_dir) if log_dir else (
+            Path(get("INVESTOR_GAME_LOG_DIR")) if get("INVESTOR_GAME_LOG_DIR") else None)
+        if log_path is not None and log_path.exists() and not log_path.is_dir():
+            raise ConfigError(f"The log directory must be a folder: {log_path}")
         return cls(
             brain=brain,
             voice=voice,
@@ -82,6 +92,7 @@ class Settings:
             claude_model=get("INVESTOR_GAME_CLAUDE_MODEL"),
             ollama_host=get("OLLAMA_HOST"),
             ollama_model=get("INVESTOR_GAME_OLLAMA_MODEL"),
+            log_dir=log_path,
         )
 
     def missing(self) -> list[str]:
@@ -94,7 +105,28 @@ class Settings:
         return problems
 
     def describe(self) -> str:
-        return f"brain: {self.brain} · voice: {self.voice}"
+        text = f"brain: {self.brain} · voice: {self.voice}"
+        return f"{text} · logs: {self.log_dir}" if self.log_dir else text
+
+    def secrets(self) -> list[str]:
+        return [s for s in (self.typesafe_api_key, self.anthropic_api_key) if s]
+
+    def backends(self) -> dict[str, dict[str, str | None]]:
+        """Backend and model names for each game's ``game.json``."""
+        brain_models = {"jev": self.typesafe_model or JEV_MODEL,
+                        "laya": self.laya_model or LAYA_MODEL}
+        voice_models = {"claude": self.claude_model or CLAUDE_MODEL,
+                        "ollama": self.ollama_model or OLLAMA_MODEL}
+        return {
+            "brain": {"backend": self.brain, "model": brain_models.get(self.brain)},
+            "voice": {"backend": self.voice, "model": voice_models.get(self.voice)},
+        }
+
+
+def build_log_root(settings: Settings) -> LogRoot | None:
+    if settings.log_dir is None:
+        return None
+    return LogRoot(settings.log_dir, secrets=settings.secrets())
 
 
 def build_brain(settings: Settings) -> InvestorBrain:

@@ -18,11 +18,19 @@ The system SHALL install a console command `investor-game` that starts an intera
 - **THEN** the program exits with a goodbye message and exit code 130, without a traceback
 
 ### Requirement: Configuration
-The command SHALL accept `--brain {jev,laya,stub}`, `--voice {claude,ollama,stub}`, `--offline` (short for stub brain and stub voice), `--brain-timeout`, `--voice-timeout` and `--version`. Each option SHALL have an environment-variable equivalent (`INVESTOR_GAME_BRAIN`, `INVESTOR_GAME_VOICE`, etc.). Backend settings SHALL be read from the environment: `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `LAYA_BASE_URL`, `ANTHROPIC_API_KEY`, `INVESTOR_GAME_CLAUDE_MODEL`, `OLLAMA_HOST` and `INVESTOR_GAME_OLLAMA_MODEL`. Missing required settings for the chosen backend SHALL be reported before the game starts, with the name of the missing variable.
+The command SHALL accept `--brain {jev,laya,stub}`, `--voice {claude,ollama,stub}`, `--offline` (short for stub brain and stub voice), `--brain-timeout`, `--voice-timeout`, `--log-dir PATH` and `--version`. Each option SHALL have an environment-variable equivalent (`INVESTOR_GAME_BRAIN`, `INVESTOR_GAME_VOICE`, `INVESTOR_GAME_LOG_DIR`, etc.). Backend settings SHALL be read from the environment: `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `LAYA_BASE_URL`, `ANTHROPIC_API_KEY`, `INVESTOR_GAME_CLAUDE_MODEL`, `OLLAMA_HOST` and `INVESTOR_GAME_OLLAMA_MODEL`. Missing required settings for the chosen backend SHALL be reported before the game starts, with the name of the missing variable. If `--log-dir` points to an existing path that is not a directory, the program SHALL report it before the game starts and exit with a non-zero code.
 
 #### Scenario: Missing Anthropic key
 - **WHEN** the user runs `investor-game --voice claude` with no `ANTHROPIC_API_KEY`
 - **THEN** the program prints that `ANTHROPIC_API_KEY` is required for the claude voice, and exits with a non-zero code
+
+#### Scenario: Log directory from the environment
+- **WHEN** the user runs `investor-game` with `INVESTOR_GAME_LOG_DIR=./logs`
+- **THEN** LLM call logging is enabled with `./logs` as the log directory
+
+#### Scenario: Log directory is a file
+- **WHEN** the user runs `investor-game --log-dir notes.txt` and `notes.txt` is an existing file
+- **THEN** the program prints that the log directory must be a folder, and exits with a non-zero code before the Setup step
 
 ### Requirement: Setup step
 The Setup step SHALL list the six investors with their number, emoji, name, description and traits, and let the player choose one by number. It SHALL then ask for the startup name, sector, description, pre-money valuation and ask, with the GreenCharge example as the default for each prompt (Enter accepts it). Money inputs SHALL accept forms such as `500000`, `500k`, `2M` and `€2,000,000`. After the valuation and the ask are entered, the screen SHALL show the implied equity ("Asking €500k at €2M pre-money = 20.0% equity"). Invalid fields SHALL show the plain-language error and ask for that field again. The player SHALL confirm before the negotiation starts.
@@ -84,3 +92,47 @@ Errors shown to the player SHALL be short and plain (for example "The investor c
 #### Scenario: Brain failure message
 - **WHEN** the brain request fails during a turn
 - **THEN** the player sees the plain retry message, and is prompted again for the same turn
+
+### Requirement: Log folder shown to the player
+When LLM call logging is enabled, the startup banner SHALL say that logging is on and name the log directory. The Negotiation step SHALL show the current game's log folder path when the game starts, and the Debrief SHALL show it again. When logging is off, no log paths SHALL be shown.
+
+#### Scenario: Logging on
+- **WHEN** the player starts a game with `--log-dir logs`
+- **THEN** the negotiation screen shows a line such as "LLM logs: logs/2026-10-05T11-42-07_g1_rex", and the debrief shows the same path
+
+#### Scenario: Logging off
+- **WHEN** the player starts a game without a log directory
+- **THEN** no "LLM logs" line is shown
+
+### Requirement: Environment file
+When `investor-game` starts, it SHALL read a file named `.env` in the current working directory, if one exists, before any configuration is read. Each `NAME=value` entry SHALL become available exactly like an exported environment variable, for every setting the program reads from the environment: backend choice, keys, URLs, models, timeouts, offline mode and the log directory. Precedence SHALL be: command-line flags first, then variables already set in the real environment, then `.env`. A variable already present in the environment SHALL NOT be overwritten by `.env`. The file SHALL support comments (`#`), blank lines, an optional `export ` prefix, and single- or double-quoted values.
+
+A missing `.env` SHALL NOT be an error, and SHALL produce no message. Lines that cannot be parsed SHALL be skipped, and the player SHALL see one warning listing their line numbers, never their contents. The program SHALL then continue. When a `.env` file was loaded, the startup banner SHALL say so (for example, "settings: .env") without showing any value. The repository SHALL ignore `.env` in version control and SHALL provide a committed `.env.example` that documents every supported variable with placeholder values.
+
+#### Scenario: Keys from .env
+- **WHEN** `.env` contains `ANTHROPIC_API_KEY=sk-ant-123` and `INVESTOR_GAME_VOICE=claude`, nothing else sets them, and the user runs `investor-game`
+- **THEN** the game starts with the claude voice using that key, and no "required" error is shown
+
+#### Scenario: Real environment wins
+- **WHEN** `.env` contains `INVESTOR_GAME_BRAIN=jev` and the shell has `INVESTOR_GAME_BRAIN=stub` exported
+- **THEN** the brain is `stub`
+
+#### Scenario: Flag wins
+- **WHEN** `.env` contains `INVESTOR_GAME_VOICE=ollama` and the user runs `investor-game --voice stub`
+- **THEN** the voice is `stub`
+
+#### Scenario: No .env file
+- **WHEN** there is no `.env` in the current directory
+- **THEN** the program starts normally, without any message about `.env`
+
+#### Scenario: Malformed line
+- **WHEN** line 3 of `.env` is `this is not valid` and the other lines are valid
+- **THEN** the valid entries are applied, one warning mentions line 3 without showing its text, and the game starts
+
+#### Scenario: Banner notice without values
+- **WHEN** a `.env` with `ANTHROPIC_API_KEY=sk-ant-123` is loaded
+- **THEN** the banner includes "settings: .env" and the output never contains `sk-ant-123`
+
+#### Scenario: Secrets stay out of git
+- **WHEN** the repository's ignore rules are checked
+- **THEN** `.env` is ignored and `.env.example` is tracked

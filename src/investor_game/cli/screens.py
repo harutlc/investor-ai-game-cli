@@ -71,12 +71,14 @@ class App:
         self.console = term.console
         self.session = session
         self.backends = backends
+        self._warned: set[int] = set()  # games whose log warning was already shown
 
     # -- top level ----------------------------------------------------------
 
     def run(self) -> None:
         self.console.print(
-            f"[bold]💼 Investor Negotiation Game[/bold]  [dim]{escape(self.backends)}[/dim]"
+            f"[bold]💼 Investor Negotiation Game[/bold]  [dim]{escape(self.backends)}[/dim]",
+            soft_wrap=True,
         )
         while True:
             view = self.setup()
@@ -153,6 +155,7 @@ class App:
             f"Negotiating {escape(view.pitch.name)} with {view.investor.emoji} "
             f"[bold]{view.investor.name}[/bold]. Type [bold]h[/bold] for help."
         )
+        self.show_log_folder(view)
         self.show_turn(view)
         while not view.ended:
             move = self.read_move(view)
@@ -161,6 +164,18 @@ class App:
             view = self.send(view, move)
         self.console.print(render.end_banner(view))
         return view
+
+    def show_log_folder(self, view: PlayerView) -> None:
+        if view.log_folder:
+            # No wrapping, so the path stays copyable.
+            self.console.print(f"[dim]LLM logs: {escape(view.log_folder)}[/dim]",
+                               soft_wrap=True)
+        self.show_log_warning(view)
+
+    def show_log_warning(self, view: PlayerView) -> None:
+        if view.log_warning and view.id not in self._warned:
+            self._warned.add(view.id)
+            self.console.print(f"[yellow]{escape(view.log_warning)}[/yellow]")
 
     def show_turn(self, view: PlayerView) -> None:
         for message in render.latest_investor_messages(view):
@@ -230,6 +245,7 @@ class App:
         except (BrainUnavailableError, GameOverError) as exc:
             self.console.print(f"[red]{escape(str(exc))}[/red]")
             return view
+        self.show_log_warning(new_view)
         self.show_turn(new_view)
         return new_view
 
@@ -240,6 +256,7 @@ class App:
         self.console.print(Rule())
         self.console.print(render.steps("Debrief"))
         self.console.print(render.debrief(view))
+        self.show_log_folder(view)
         while True:
             self.console.print(
                 "1. Read the conversation again  2. Brain insights  3. Play again  "

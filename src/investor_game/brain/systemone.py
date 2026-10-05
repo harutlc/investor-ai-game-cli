@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from .. import llmlog
 from .base import BrainError, Question, RawAnswer
 
 JEV_BASE_URL = "https://api.typesafe.ai"
@@ -64,10 +65,11 @@ class SystemOneBackend:
             "questions": {q.id: q.to_api() for q in questions},
         }
         deadline = time.monotonic() + self.timeout
-        response = self._post(body, deadline)
+        response, logging_time = self._post(body, deadline)
+        deadline += logging_time  # writing call logs never eats into the time limit
         if response.status_code in RETRY_STATUSES and deadline - time.monotonic() > RETRY_BACKOFF:
             time.sleep(RETRY_BACKOFF)
-            response = self._post(body, deadline)
+            response, _ = self._post(body, deadline)
         if response.status_code != 200:
             raise BrainError(f"{self.name} returned HTTP {response.status_code}")
         try:
@@ -77,17 +79,36 @@ class SystemOneBackend:
         except (ValueError, KeyError, TypeError) as exc:
             raise BrainError(f"{self.name} returned a malformed response: {exc!r}") from exc
 
-    def _post(self, body: dict[str, Any], deadline: float) -> httpx.Response:
+    def _post(self, body: dict[str, Any], deadline: float) -> tuple[httpx.Response, float]:
+        """POST once and record the exchange; returns the response and time spent logging."""
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise BrainError(f"{self.name} timed out")
+        request = self._client.build_request("POST", PATH, json=body, timeout=remaining)
+        started_at, started = llmlog.now(), time.monotonic()
         try:
-            return self._client.post(PATH, json=body, timeout=remaining)
+            response = self._client.send(request)
         except httpx.TimeoutException as exc:
+            self._record(request, started_at, started, error=("timeout", f"{self.name} timed out"))
             raise BrainError(f"{self.name} timed out") from exc
         except httpx.HTTPError as exc:
+            self._record(request, started_at, started, error=("connection", type(exc).__name__))
             raise BrainError(f"{self.name} request failed: {exc!r}") from exc
+        finished = time.monotonic()
+        error = None if response.status_code == 200 else (
+            "http_status", f"HTTP {response.status_code}")
+        self._record(request, started_at, started, response=response, error=error,
+                     finished=finished)
+        return response, time.monotonic() - finished
 
+    def _record(self, request: httpx.Request, started_at: Any, started: float,
+                response: httpx.Response | None = None,
+                error: tuple[str, str] | None = None, finished: float | None = None) -> None:
+        llmlog.record_http(
+            f"brain-{self.name}", self.model, request, started_at,
+            llmlog.elapsed_ms(started, finished or time.monotonic()), response=response,
+            error={"type": error[0], "message": error[1]} if error else None,
+        )
 
 def _probabilities(data: dict[str, Any]) -> dict[str, float]:
     raw = data.get("probabilities") or {}

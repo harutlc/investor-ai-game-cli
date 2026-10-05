@@ -2,22 +2,38 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .brain.investor import InvestorBrain
 from .engine import Game
+from .llmlog import LogRoot
 from .models import Move, Pitch, PlayerView
+from .personas import get_persona
 from .voice.guarded import GuardedVoice
 
 
 class Session:
     """The CLI's only entry point to games. Everything it returns is a ``PlayerView``."""
 
-    def __init__(self, brain: InvestorBrain, voice: GuardedVoice):
+    def __init__(self, brain: InvestorBrain, voice: GuardedVoice,
+                 log_root: LogRoot | None = None, backends: dict[str, Any] | None = None):
         self.brain = brain
         self.voice = voice
+        self.log_root = log_root
+        self.backends = backends or {}
         self._games: list[Game] = []
 
     def new_game(self, pitch: Pitch, persona_id: str) -> PlayerView:
-        game = Game.start(len(self._games) + 1, pitch, persona_id, self.brain, self.voice)
+        game_id = len(self._games) + 1
+        game_log = None
+        if self.log_root is not None:
+            persona = get_persona(persona_id)
+            game_log = self.log_root.start_game(game_id, persona_id, {
+                "persona": {"id": persona_id, "name": persona.name},
+                "pitch": pitch.model_dump(),
+                **self.backends,
+            })
+        game = Game.start(game_id, pitch, persona_id, self.brain, self.voice, game_log)
         self._games.append(game)
         return game.view()
 
