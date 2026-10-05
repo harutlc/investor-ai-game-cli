@@ -18,7 +18,7 @@ The system SHALL install a console command `investor-game` that starts an intera
 - **THEN** the program exits with a goodbye message and exit code 130, without a traceback
 
 ### Requirement: Configuration
-The command SHALL accept `--brain {jev,laya,stub}`, `--voice {claude,ollama,stub}`, `--offline` (short for stub brain and stub voice), `--brain-timeout`, `--voice-timeout`, `--log-dir PATH` and `--version`. Each option SHALL have an environment-variable equivalent (`INVESTOR_GAME_BRAIN`, `INVESTOR_GAME_VOICE`, `INVESTOR_GAME_LOG_DIR`, etc.). Backend settings SHALL be read from the environment: `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `LAYA_BASE_URL`, `ANTHROPIC_API_KEY`, `INVESTOR_GAME_CLAUDE_MODEL`, `OLLAMA_HOST` and `INVESTOR_GAME_OLLAMA_MODEL`. Missing required settings for the chosen backend SHALL be reported before the game starts, with the name of the missing variable. If `--log-dir` points to an existing path that is not a directory, the program SHALL report it before the game starts and exit with a non-zero code.
+The command SHALL accept `--brain {jev,laya,stub}`, `--voice {claude,ollama,stub}`, `--offline` (short for stub brain and stub voice), `--brain-timeout`, `--voice-timeout`, `--log-dir PATH` and `--version`. Each option SHALL have an environment-variable equivalent (`INVESTOR_GAME_BRAIN`, `INVESTOR_GAME_VOICE`, `INVESTOR_GAME_LOG_DIR`, etc.). Backend settings SHALL be read from the environment: `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `TYPESAFE_MODEL`, `LAYA_BASE_URL`, `LAYA_MODEL`, `LAYA_API_KEY`, `ANTHROPIC_API_KEY`, `INVESTOR_GAME_CLAUDE_MODEL`, `OLLAMA_HOST` and `INVESTOR_GAME_OLLAMA_MODEL`. `LAYA_MODEL` and `LAYA_API_KEY` SHALL be optional. Missing required settings for the chosen backend SHALL be reported before the game starts, with the name of the missing variable. If `--log-dir` points to an existing path that is not a directory, the program SHALL report it before the game starts and exit with a non-zero code.
 
 #### Scenario: Missing Anthropic key
 - **WHEN** the user runs `investor-game --voice claude` with no `ANTHROPIC_API_KEY`
@@ -31,6 +31,10 @@ The command SHALL accept `--brain {jev,laya,stub}`, `--voice {claude,ollama,stub
 #### Scenario: Log directory is a file
 - **WHEN** the user runs `investor-game --log-dir notes.txt` and `notes.txt` is an existing file
 - **THEN** the program prints that the log directory must be a folder, and exits with a non-zero code before the Setup step
+
+#### Scenario: Laya without optional settings
+- **WHEN** the user runs `investor-game --brain laya` with neither `LAYA_MODEL` nor `LAYA_API_KEY` set
+- **THEN** no setting is reported as missing, and the game starts
 
 ### Requirement: Setup step
 The Setup step SHALL list the six investors with their number, emoji, name, description and traits, and let the player choose one by number. It SHALL then ask for the startup name, sector, description, pre-money valuation and ask, with the GreenCharge example as the default for each prompt (Enter accepts it). Money inputs SHALL accept forms such as `500000`, `500k`, `2M` and `€2,000,000`. After the valuation and the ask are entered, the screen SHALL show the implied equity ("Asking €500k at €2M pre-money = 20.0% equity"). Invalid fields SHALL show the plain-language error and ask for that field again. The player SHALL confirm before the negotiation starts.

@@ -91,7 +91,7 @@ def test_laya_logged_in_its_own_folder(game_log):
     with llmlog.scope(game_log, 1, "offer"):
         InvestorBrain(SystemOneBackend.laya()).judge(context(), Move.make_offer(500_000, 200))
     [path] = files(game_log, "brain-laya")
-    assert load(path)["model"] == "laya"
+    assert load(path)["model"] == "auto"
     assert not files(game_log, "brain-jev")
 
 

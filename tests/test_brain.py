@@ -265,7 +265,7 @@ def test_laya_local_no_auth():
     route = respx.post("http://localhost:8000/v1/systemone").mock(side_effect=jev_responder)
     result = InvestorBrain(SystemOneBackend.laya()).judge(context(), Move.make_offer(500_000, 200))
     assert "Authorization" not in route.calls.last.request.headers
-    assert json.loads(route.calls.last.request.content)["model"] == "laya"
+    assert "model" not in json.loads(route.calls.last.request.content)  # Laya's router picks
     assert result.backend == "laya"
 
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .brain.investor import InvestorBrain
 from .brain.stub import StubBrainBackend
-from .brain.systemone import JEV_MODEL, LAYA_MODEL, SystemOneBackend
+from .brain.systemone import AUTO_MODEL_LABEL, JEV_MODEL, LAYA_MODEL, SystemOneBackend
 from .llmlog import LogRoot
 from .voice.claude import DEFAULT_MODEL as CLAUDE_MODEL
 from .voice.claude import ClaudeVoiceBackend
@@ -38,6 +38,7 @@ class Settings:
     typesafe_model: str | None = None
     laya_base_url: str | None = None
     laya_model: str | None = None
+    laya_api_key: str | None = None
     anthropic_api_key: str | None = None
     claude_model: str | None = None
     ollama_host: str | None = None
@@ -88,6 +89,7 @@ class Settings:
             typesafe_model=get("TYPESAFE_MODEL"),
             laya_base_url=get("LAYA_BASE_URL"),
             laya_model=get("LAYA_MODEL"),
+            laya_api_key=get("LAYA_API_KEY"),
             anthropic_api_key=get("ANTHROPIC_API_KEY"),
             claude_model=get("INVESTOR_GAME_CLAUDE_MODEL"),
             ollama_host=get("OLLAMA_HOST"),
@@ -109,12 +111,13 @@ class Settings:
         return f"{text} · logs: {self.log_dir}" if self.log_dir else text
 
     def secrets(self) -> list[str]:
-        return [s for s in (self.typesafe_api_key, self.anthropic_api_key) if s]
+        keys = (self.typesafe_api_key, self.anthropic_api_key, self.laya_api_key)
+        return [s for s in keys if s]
 
     def backends(self) -> dict[str, dict[str, str | None]]:
         """Backend and model names for each game's ``game.json``."""
         brain_models = {"jev": self.typesafe_model or JEV_MODEL,
-                        "laya": self.laya_model or LAYA_MODEL}
+                        "laya": self.laya_model or LAYA_MODEL or AUTO_MODEL_LABEL}
         voice_models = {"claude": self.claude_model or CLAUDE_MODEL,
                         "ollama": self.ollama_model or OLLAMA_MODEL}
         return {
@@ -137,7 +140,8 @@ def build_brain(settings: Settings) -> InvestorBrain:
         )
     elif settings.brain == "laya":
         backend = SystemOneBackend.laya(
-            settings.laya_base_url, settings.laya_model, timeout=settings.brain_timeout
+            settings.laya_base_url, settings.laya_model, api_key=settings.laya_api_key,
+            timeout=settings.brain_timeout,
         )
     else:
         backend = StubBrainBackend()
